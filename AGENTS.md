@@ -1,5 +1,21 @@
 # Agent instructions
 
+## The one rule that overrides everything else
+
+**One module = one PR = one green CI run.**
+
+"CI green" means the GitHub Actions `CI` workflow passed on the PR branch —
+not "tests pass locally" or "looks structurally sound." Do not merge a step
+until CI is green. Do not start the next step's implementation until the
+previous step's PR has merged.
+
+Do not stub, scaffold, or partially implement any future module while working
+on the current one. If you find yourself creating a file that belongs to a
+later step, stop and delete it. Premature cross-module coupling defeats the
+pure-function / facts-vs-beliefs boundaries the architecture is built on.
+
+---
+
 **First: check `docs/STATUS.md` to see which build step is next and what
 already exists.** The build has a strict step order (SPEC.md §"Build order");
 do not start a step until the previous one is CI-green and STATUS.md is updated.
@@ -28,8 +44,9 @@ list in the relevant section.
    (arithmetic only) — if you find yourself adding a conditional to `apply`
    that isn't "this event type updates these fields," that logic probably
    belongs in `attempt` or a derived query instead.
-4. CI green before moving to the next module. Do not start the next
-   module's implementation in the same PR.
+4. Open a PR. CI must pass (GitHub Actions `CI` workflow) before merging.
+   Do not begin the next module's implementation until this PR is merged.
+   Do not include any files, types, or stubs from future steps in this PR.
 
 ## Things that look like missing features but are intentional scope cuts
 

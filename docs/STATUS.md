@@ -8,8 +8,8 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | # | What | Status | Notes |
 |---|------|--------|-------|
 | 1 | `engine/cards.ts` + `math/handEvaluator.ts` | ✅ done | 54 tests; naive C(7,5) eval; wheel straight, all category/kicker/tie cases covered |
-| 2 | `engine/gameState.ts` + `transitions.ts` + `kernel.ts` | 🔜 next | heads-up only, single pot; formula-driven test table first (BB option, short all-in non-reopen, reopened predicate) |
-| 3 | `engine/pots.ts` | — | `settlePots`/`payouts`; tested standalone with hand-constructed commitment tables |
+| 2 | `engine/gameState.ts` + `transitions.ts` + `kernel.ts` | ✅ done | 52 tests; BB option, short all-in non-deadlock, non-all-in short-raise illegal, all-in run-out cascade, full hand replay pipeline; seen=-1 sentinel for fresh-street action trigger |
+| 3 | `engine/pots.ts` | 🔜 next | `settlePots`/`payouts`; tested standalone with hand-constructed commitment tables |
 | 4 | `engine/table.ts` | — | hand lifecycle, heads-up button toggle → **checkpoint: playable heads-up NLHE loop** |
 | 5 | `math/range.ts` + `math/equity.ts` | — | Range parsing, card removal, exact/MC equity |
 | 6 | `training/scenarioBuilder.ts` + `policies.ts` | — | EVPolicy + EquityPolicy first → **checkpoint: pot-odds/equity drills** |
@@ -38,3 +38,21 @@ packages/
 ```
 
 No `gameState.ts`, `kernel.ts`, `pots.ts`, or `training/` yet.
+
+## Repo state at step 2 completion
+
+```
+packages/
+  engine/src/cards.ts        — Card, Rank, Suit, parseCard, freshDeck, shuffleDeck
+  engine/src/gameState.ts    — GameState, PlayerState, PlayerId, Amount, Street
+  engine/src/transitions.ts  — Command, TransitionEvent
+  engine/src/kernel.ts       — attempt, apply, deriveNext, all predicates + legalActions
+  engine/src/index.ts        — re-exports all
+  engine/test/kernel.test.ts — 52 tests, all green
+```
+
+Key implementation notes:
+- `seen = -1` sentinel: "hasn't acted this street" — resolves fresh-street action trigger
+  when `lastFullBetLevel = 0` (invariants §5 reset); `-1 < 0` is true so `reopened = true`.
+- `BoardCardsRevealed` apply resets `seen = -1` (not 0) for each player.
+- Kernel is N-player general from day one; heads-up falls out of the same formulas.

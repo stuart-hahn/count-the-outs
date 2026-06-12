@@ -1,5 +1,9 @@
 # Agent instructions
 
+**First: check `docs/STATUS.md` to see which build step is next and what
+already exists.** The build has a strict step order (SPEC.md §"Build order");
+do not start a step until the previous one is CI-green and STATUS.md is updated.
+
 Before touching anything in `/packages/engine` (or any code that depends on
 `GameState` shape), read `docs/invariants.md` in full. It contains the
 load-bearing formulas for legality, turn order, betting-round completion,

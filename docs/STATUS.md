@@ -12,8 +12,8 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 3 | `engine/pots.ts` | ✅ done | 25 tests; layer-stripping, folded-only level merge, multi-pot side pots, odd-chip seat-order priority, BestHandFn DI (engine stays pure) |
 | 4 | `engine/table.ts` | ✅ done | 20 tests; TableState, startHand, endHand, nextButton; bust elimination; button rotation before elimination; bigBlind in TableState; **checkpoint: playable heads-up NLHE loop** |
 | 5 | `math/range.ts` + `math/equity.ts` | ✅ done | 27 tests; parseRange (all standard notations), effectiveRange (card removal), exact enumeration ≤200k threshold, MC with stderr |
-| 6 | `training/scenarioBuilder.ts` + `policies.ts` | 🔜 next | EVPolicy + EquityPolicy first → **checkpoint: pot-odds/equity drills** |
-| 7 | `training/ranges/` + `RangePolicy` | — | ~10-20 heuristic reference ranges → **checkpoint: preflop open/3bet drills** |
+| 6 | `training/scenarioBuilder.ts` + `policies.ts` | ✅ done | 22 tests; buildScenario via attempt/apply pipeline (§10), EVPolicy (regret ≤ ε), EquityPolicy (equity vs pot-odds break-even); **checkpoint: pot-odds/equity drills** |
+| 7 | `training/ranges/` + `RangePolicy` | 🔜 next | ~10-20 heuristic reference ranges → **checkpoint: preflop open/3bet drills** |
 | 8 | N-player generalization (3–6 seats) | — | `seatOrder`/`buttonSeat`/`nextButton`; kernel already general |
 | 9 | Multi-pot stress test | — | extensive regression suite for `settlePots` with multiple all-ins |
 | 10 | `training/drillRecord.ts` | — | append-only log + query-based analytics |
@@ -102,6 +102,26 @@ packages/
 
 Key implementation notes:
 - `Range = Map<string, Weight>` keyed by canonical combo string (e.g. `"As_Kh"`); higher rank first, tie-break by suit index (c=0 d=1 h=2 s=3).
+
+## Repo state at step 6 completion
+
+```
+packages/
+  training/src/scenarioBuilder.ts — ScenarioSpec, ScenarioStep, buildScenario
+  training/src/policies.ts        — Verdict, EvaluationPolicy, EquityPolicy, EVPolicy
+  training/src/index.ts           — re-exports
+  training/test/policies.test.ts  — 22 tests, all green (200 total across 6 files)
+```
+
+Key implementation notes:
+- `buildScenario(spec)` replays `Command | TransitionEvent` steps via `attempt`/`apply`; no direct state injection (invariants §10).
+  Commands (Check/Fold/Call/RaiseTo/PostBlind) go through `attempt`; Events applied directly. Illegal commands throw.
+- `EquityPolicy`: `correctEdge = isCall ? (equity−breakEven) : (breakEven−equity)`; `correct = correctEdge >= −ε`;
+  `score = clamp(1 − regret/0.5)` where `regret = max(0, −correctEdge)`.
+- `EVPolicy`: `EV(call) = equity × (pot+call) − call`; `EV(fold) = 0`; `regret = EV(best) − EV(chosen)`;
+  `correct = regret ≤ ε`; `score = clamp(1 − regret/scale)` where `scale` defaults to pot size.
+- `totalPot` = sum of `totalCommitments(state).values()` (BlindPosted + ChipsCommitted events from history).
+- Both policies: no `ctx` → `{ correct: false, score: 0, ... }`; `callAmount == 0` or non-call/fold action → `{ correct: true, score: 1, ... }`.
 - `parseRange` handles: specific combos (`AhKs`), pairs (`AA`), suited (`AKs`), offsuit (`AKo`), both (`AK`), plus ranges (`QQ+`, `ATs+`), dash ranges (`JJ-99`, `KQs-KTs`), weight modifiers (`AA:0.5`), comma/space-separated lists.
 - `effectiveRange(R, deadCards)` — filter once, normalize once; no pre-step renormalization (invariants.md §11 rejected alternative).
 - `compute` exact threshold = 200k (`∏|effRange_i| × C(unseen, boardNeeded)`): catches all river scenarios and small-range turn/flop; falls back to MC with reported stderr.

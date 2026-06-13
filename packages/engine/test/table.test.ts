@@ -313,3 +313,166 @@ describe('heads-up NLHE loop', () => {
     expect(b.stack).toBe(1010); // carries updated stack
   });
 });
+
+// ── N-player (3-6 seat) table lifecycle ──────────────────────────────────────
+
+function make3Table(opts: { buttonSeat?: string; bigBlind?: number } = {}): TableState {
+  return makeTable({
+    seatOrder: ['A', 'B', 'C'],
+    buttonSeat: opts.buttonSeat ?? 'A',
+    stacks: { A: 1000, B: 1000, C: 1000 },
+    bigBlind: opts.bigBlind ?? 20,
+  });
+}
+
+// Post SB + BB in a 3-player game (button does NOT post).
+function postBlinds3(state: GameState): GameState {
+  const bb = state.bigBlind;
+  const sb = bb / 2;
+  let s = state;
+  const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+    const r = attempt(s, cmd);
+    if (!r.ok) throw new Error('blind post failed: ' + r.error);
+    for (const ev of r.events) s = apply(s, ev);
+  };
+  applyCmd({ kind: 'PostBlind', amount: sb });
+  applyCmd({ kind: 'PostBlind', amount: bb });
+  return s;
+}
+
+describe('startHand — 3-player', () => {
+  it('creates GameState with 3 players, correct seatOrder', () => {
+    const table = make3Table();
+    const state = startHand(table);
+    expect(state.seatOrder).toEqual(['A', 'B', 'C']);
+    expect(state.buttonSeat).toBe('A');
+    expect(state.players).toHaveLength(3);
+  });
+
+  it('all players start with stack from table, committed=0, seen=-1', () => {
+    const state = startHand(make3Table());
+    for (const p of state.players) {
+      expect(p.stack).toBe(1000);
+      expect(p.committedThisStreet).toBe(0);
+      expect(p.seen).toBe(-1);
+      expect(p.folded).toBe(false);
+    }
+  });
+});
+
+describe('endHand — 3-player', () => {
+  it('button rotates A→B→C→A across three hands', () => {
+    let table = make3Table({ buttonSeat: 'A' });
+    const firstWins3: BestHandFn = (eligible) => [eligible[0]!];
+
+    const playOneHandBTNFolds = (t: TableState): TableState => {
+      let state = startHand(t);
+      state = postBlinds3(state); // B=SB, C=BB
+      // A=BTN (UTG) folds immediately
+      const r = attempt(state, { kind: 'Fold' });
+      if (r.ok) for (const ev of r.events) state = apply(state, ev);
+      // SB calls, BB checks
+      const r2 = attempt(state, { kind: 'Call' });
+      if (r2.ok) for (const ev of r2.events) state = apply(state, ev);
+      const r3 = attempt(state, { kind: 'Check' });
+      if (r3.ok) for (const ev of r3.events) state = apply(state, ev);
+      // Run out board
+      for (const street of ['flop', 'turn', 'river'] as const) {
+        state = apply(state, { kind: 'BoardCardsRevealed', street, cards: [] });
+        let actor = (state.players.find(p => !p.folded && p.stack > 0 && state.seatOrder.includes(p.id)));
+        let safety = 0;
+        while (actor && safety++ < 10) {
+          const r = attempt(state, { kind: 'Check' });
+          if (!r.ok) break;
+          for (const ev of r.events) state = apply(state, ev);
+          actor = state.players.find(p => !p.folded && p.stack > 0 && state.seatOrder.indexOf(p.id) > state.seatOrder.indexOf(actor!.id));
+        }
+      }
+      return endHand(t, state, firstWins3);
+    };
+
+    // Simpler: just fold everyone to BB
+    const playFoldToSB = (t: TableState): TableState => {
+      let state = startHand(t);
+      state = postBlinds3(state);
+      // BTN folds (A), SB folds (B), BB wins
+      const r1 = attempt(state, { kind: 'Fold' }); // BTN
+      if (r1.ok) for (const ev of r1.events) state = apply(state, ev);
+      const r2 = attempt(state, { kind: 'Fold' }); // SB
+      if (r2.ok) for (const ev of r2.events) state = apply(state, ev);
+      expect(handTerminal(state)).toBe(true);
+      return endHand(t, state, firstWins3);
+    };
+
+    table = playFoldToSB(table); // hand 1: A=BTN
+    expect(table.buttonSeat).toBe('B'); // rotated to B
+    table = playFoldToSB(table); // hand 2: B=BTN
+    expect(table.buttonSeat).toBe('C');
+    table = playFoldToSB(table); // hand 3: C=BTN
+    expect(table.buttonSeat).toBe('A'); // wraps around
+  });
+
+  it('eliminates all bust players after all-in showdown', () => {
+    // All start with 20 (= 1 BB). After blinds + calls, everyone is all-in.
+    // B wins → A and C end at 0 chips → both eliminated.
+    const table = makeTable({
+      seatOrder: ['A', 'B', 'C'],
+      buttonSeat: 'A',
+      stacks: { A: 20, B: 20, C: 20 },
+      bigBlind: 20,
+    });
+    let state = startHand(table);
+    state = postBlinds3(state); // B=SB(10,stack=10), C=BB(20,all-in)
+    const r1 = attempt(state, { kind: 'Call' }); // A calls 20 (all-in)
+    expect(r1.ok).toBe(true);
+    if (r1.ok) for (const ev of r1.events) state = apply(state, ev);
+    const r2 = attempt(state, { kind: 'Call' }); // B calls 10 more (all-in)
+    expect(r2.ok).toBe(true);
+    if (r2.ok) for (const ev of r2.events) state = apply(state, ev);
+    // All-in run-out cascade
+    state = apply(state, { kind: 'BoardCardsRevealed', street: 'flop', cards: [] });
+    state = apply(state, { kind: 'BoardCardsRevealed', street: 'turn', cards: [] });
+    state = apply(state, { kind: 'BoardCardsRevealed', street: 'river', cards: [] });
+    expect(handTerminal(state)).toBe(true);
+
+    const bWins: BestHandFn = () => ['B'];
+    const newTable = endHand(table, state, bWins);
+    expect(newTable.seatOrder).toEqual(['B']);
+    expect(newTable.stacks.size).toBe(1);
+    expect(newTable.stacks.get('B')).toBe(60); // B won the 60-chip pot
+  });
+});
+
+describe('3-player NLHE loop checkpoint', () => {
+  it('two consecutive hands with correct blind assignments', () => {
+    let table = make3Table({ buttonSeat: 'A' });
+
+    // Hand 1: A=BTN, B=SB, C=BB
+    let state = startHand(table);
+    state = postBlinds3(state);
+    // B posts SB, C posts BB — verify
+    const sbEvent = state.history.find(e => e.kind === 'BlindPosted' && (e as { player: string }).player === 'B');
+    const bbEvent = state.history.find(e => e.kind === 'BlindPosted' && (e as { player: string }).player === 'C');
+    expect(sbEvent).toBeTruthy();
+    expect(bbEvent).toBeTruthy();
+    expect((sbEvent as { amount: number }).amount).toBe(10);
+    expect((bbEvent as { amount: number }).amount).toBe(20);
+
+    // Everyone folds to BB
+    const r1 = attempt(state, { kind: 'Fold' });
+    if (r1.ok) for (const ev of r1.events) state = apply(state, ev);
+    const r2 = attempt(state, { kind: 'Fold' });
+    if (r2.ok) for (const ev of r2.events) state = apply(state, ev);
+
+    table = endHand(table, state, () => ['C']);
+    expect(table.buttonSeat).toBe('B');
+
+    // Hand 2: B=BTN, C=SB, A=BB
+    state = startHand(table);
+    state = postBlinds3(state);
+    const sbEvent2 = state.history.find(e => e.kind === 'BlindPosted' && (e as { player: string }).player === 'C');
+    const bbEvent2 = state.history.find(e => e.kind === 'BlindPosted' && (e as { player: string }).player === 'A');
+    expect(sbEvent2).toBeTruthy();
+    expect(bbEvent2).toBeTruthy();
+  });
+});

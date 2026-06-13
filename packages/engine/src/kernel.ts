@@ -54,9 +54,12 @@ function lastActionAcceptedThisStreet(history: TransitionEvent[]): PlayerId | nu
 
 function firstToAct(state: GameState): PlayerId {
   if (state.street === 'preflop') {
-    // seatAfter(BB); heads-up: Button=SB, BB=seatAfter(Button)
-    // firstToAct = seatAfter(BB) = Button — falls out automatically (§4)
-    const bb = nextSeat(state.seatOrder, state.buttonSeat);
+    // invariants.md §4: seatAfter(BB). Heads-up falls out automatically:
+    // Button=SB, seatAfter(Button)=BB, seatAfter(BB)=Button.
+    const sb = state.seatOrder.length === 2
+      ? state.buttonSeat
+      : nextSeat(state.seatOrder, state.buttonSeat);
+    const bb = nextSeat(state.seatOrder, sb);
     return nextSeat(state.seatOrder, bb);
   }
   return nextSeat(state.seatOrder, state.buttonSeat);
@@ -117,8 +120,12 @@ export type AttemptResult =
 
 function nextBlindPoster(state: GameState): PlayerId | null {
   const posted = state.history.filter(e => e.kind === 'BlindPosted').length;
-  if (posted === 0) return state.buttonSeat; // SB = Button
-  if (posted === 1) return nextSeat(state.seatOrder, state.buttonSeat); // BB
+  // Heads-up: SB = button. Multiway: SB = nextSeat(button).
+  const sb = state.seatOrder.length === 2
+    ? state.buttonSeat
+    : nextSeat(state.seatOrder, state.buttonSeat);
+  if (posted === 0) return sb;
+  if (posted === 1) return nextSeat(state.seatOrder, sb);
   return null;
 }
 

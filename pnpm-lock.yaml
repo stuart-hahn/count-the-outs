@@ -35,6 +35,15 @@ importers:
         specifier: workspace:*
         version: link:../engine
 
+  packages/training:
+    dependencies:
+      '@count-the-outs/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@count-the-outs/math':
+        specifier: workspace:*
+        version: link:../math
+
 packages:
 
   '@esbuild/aix-ppc64@0.21.5':

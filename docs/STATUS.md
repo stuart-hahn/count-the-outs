@@ -11,8 +11,8 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 2 | `engine/gameState.ts` + `transitions.ts` + `kernel.ts` | ✅ done | 52 tests; BB option, short all-in non-deadlock, non-all-in short-raise illegal, all-in run-out cascade, full hand replay pipeline; seen=-1 sentinel for fresh-street action trigger |
 | 3 | `engine/pots.ts` | ✅ done | 25 tests; layer-stripping, folded-only level merge, multi-pot side pots, odd-chip seat-order priority, BestHandFn DI (engine stays pure) |
 | 4 | `engine/table.ts` | ✅ done | 20 tests; TableState, startHand, endHand, nextButton; bust elimination; button rotation before elimination; bigBlind in TableState; **checkpoint: playable heads-up NLHE loop** |
-| 5 | `math/range.ts` + `math/equity.ts` | 🔜 next | Range parsing, card removal, exact/MC equity |
-| 6 | `training/scenarioBuilder.ts` + `policies.ts` | — | EVPolicy + EquityPolicy first → **checkpoint: pot-odds/equity drills** |
+| 5 | `math/range.ts` + `math/equity.ts` | ✅ done | 27 tests; parseRange (all standard notations), effectiveRange (card removal), exact enumeration ≤200k threshold, MC with stderr |
+| 6 | `training/scenarioBuilder.ts` + `policies.ts` | 🔜 next | EVPolicy + EquityPolicy first → **checkpoint: pot-odds/equity drills** |
 | 7 | `training/ranges/` + `RangePolicy` | — | ~10-20 heuristic reference ranges → **checkpoint: preflop open/3bet drills** |
 | 8 | N-player generalization (3–6 seats) | — | `seatOrder`/`buttonSeat`/`nextButton`; kernel already general |
 | 9 | Multi-pot stress test | — | extensive regression suite for `settlePots` with multiple all-ins |
@@ -89,3 +89,21 @@ Key implementation notes:
   (NOT `table.stacks[p] + payouts[p]` — pre-hand stacks already "spent" committed chips).
 - Button rotated **before** eliminating bust seats — wrap-around still works when button goes bust.
 - Players with `stack==0` after `endHand` are removed from `seatOrder` and `stacks`.
+
+## Repo state at step 5 completion
+
+```
+packages/
+  math/src/range.ts          — Weight, Range, comboKey, keyToCombo, cardStr, effectiveRange, parseRange
+  math/src/equity.ts         — AnalysisContext, EquityMethod, EquityResult, compute
+  math/src/index.ts          — re-exports range.ts + equity.ts additions
+  math/test/equity.test.ts   — 27 tests, all green (178 total across 5 files)
+```
+
+Key implementation notes:
+- `Range = Map<string, Weight>` keyed by canonical combo string (e.g. `"As_Kh"`); higher rank first, tie-break by suit index (c=0 d=1 h=2 s=3).
+- `parseRange` handles: specific combos (`AhKs`), pairs (`AA`), suited (`AKs`), offsuit (`AKo`), both (`AK`), plus ranges (`QQ+`, `ATs+`), dash ranges (`JJ-99`, `KQs-KTs`), weight modifiers (`AA:0.5`), comma/space-separated lists.
+- `effectiveRange(R, deadCards)` — filter once, normalize once; no pre-step renormalization (invariants.md §11 rejected alternative).
+- `compute` exact threshold = 200k (`∏|effRange_i| × C(unseen, boardNeeded)`): catches all river scenarios and small-range turn/flop; falls back to MC with reported stderr.
+- Dead cards passed to `effectiveRange` = board only; inter-player card conflicts resolved during enumeration (usedKeys set).
+- MC weighted sampling handles unequal combo weights; stderr = max Bernoulli stderr over all players.

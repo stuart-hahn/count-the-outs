@@ -17,6 +17,7 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 8 | N-player generalization (3–6 seats) | ✅ done | 18 tests; fixed `nextBlindPoster` (SB=nextSeat(btn) multiway) and `firstToAct` (UTG=seatAfter(BB)); 3-player BB option, postflop ordering, bust elimination, button rotation loop; 6-player SB/BB/UTG placement |
 | 9 | Multi-pot stress test | ✅ done | 41 tests; 4/5/6-player cascading all-ins, folded-only level merges (single + consecutive cascade), odd-chip independence per pot, duplicate commitment levels, chip conservation invariants (7 parameterised cases), complex showdowns with mixed winners and ties, heads-up regressions |
 | 10 | `training/drillRecord.ts` | ✅ done | 34 tests; DrillLog (append-only, copy-on-read), CoreTags taxonomy (position/street/actionContext/stackDepth/potType), aux free-form map; accuracy/filterByCore/leaks/groupBy/trend pure query functions; **checkpoint: all 10 steps complete** |
+| 11 | `packages/cli` — drill runner | ✅ done | 0 new tests (pure I/O); `pnpm drill` entry point; 12 preflop spots via RangePolicy; readline line-queue input (TTY + pipe); `--count N` / `--spot NAME` flags; SIGINT partial summary; tsx dev dep; eslint no-console override scoped to cli |
 
 ## Key invariants (don't skip)
 
@@ -191,3 +192,22 @@ Key implementation notes:
 - `filterByCore` uses AND semantics across specified keys; unspecified keys are ignored.
 - `leaks` groups records missing a tag under `'unknown'`.
 - `trend` sorts by `timestamp` before windowing; returns `[]` for `windowSize <= 0` or `windowSize > records.length`.
+
+## Repo state at step 11 completion
+
+```
+packages/
+  cli/package.json           — @count-the-outs/cli, depends on engine + training
+  cli/src/spots.ts           — SpotConfig, SPOTS (12 preflop spot definitions with step-sequence builders)
+  cli/src/runner.ts          — createInputReader (line-queue readline), runSession
+  cli/src/index.ts           — argv parser (--count, --spot), entry point
+package.json                 — tsx dev dep, "drill" script
+eslint.config.js             — no-console: off for packages/cli/src/**
+```
+
+Key implementation notes:
+- `createInputReader` uses `rl.on('line')` + a waiter queue instead of `rl.question()` to avoid timing issues when stdin closes (piped input) between async loop iterations.
+- Spot step sequences inject `HoleCardsAssigned` (TransitionEvent) inline with Commands; `buildScenario` dispatches both correctly.
+- All 12 spots use fixed 100BB stacks, 6-max seat layout (`['UTG','HJ','CO','BTN','SB','BB']`), 2.5BB open size.
+- `RangePolicy` constructed per drill; no shared state across drills.
+- No persistence — `DrillLog` is in-memory per session only.

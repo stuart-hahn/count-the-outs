@@ -28,6 +28,9 @@ math      - HandEvaluator, Range, equity computation
 
 training  - ScenarioBuilder, EvaluationPolicy, Verdict, DrillRecord, analytics
             depends on: engine + math
+
+cli       - Interactive drill runner (pnpm drill); pure I/O consumer
+            depends on: engine + training (no new domain logic)
 ```
 
 Dependency direction is strictly one-way: `engine` knows nothing about
@@ -67,6 +70,11 @@ grading" separation established in invariants.md.
       ranges/               # curated reference range data (heuristic, tagged)
     test/
       policies.test.ts
+  /cli
+    src/
+      spots.ts             # SpotConfig, SPOTS — 12 preflop spot definitions
+      runner.ts            # createInputReader, runSession
+      index.ts             # argv parser, entry point (pnpm drill)
 /docs
   SPEC.md
   invariants.md

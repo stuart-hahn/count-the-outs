@@ -1,0 +1,13 @@
+{
+  "name": "@count-the-outs/training",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@count-the-outs/engine": "workspace:*",
+    "@count-the-outs/math": "workspace:*"
+  }
+}

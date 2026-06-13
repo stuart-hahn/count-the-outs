@@ -15,7 +15,7 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 6 | `training/scenarioBuilder.ts` + `policies.ts` | ✅ done | 22 tests; buildScenario via attempt/apply pipeline (§10), EVPolicy (regret ≤ ε), EquityPolicy (equity vs pot-odds break-even); **checkpoint: pot-odds/equity drills** |
 | 7 | `training/ranges/` + `RangePolicy` | ✅ done | 24 tests; 12 heuristic spots (5 opens, 3 BB defends, 4 3bets); RangePolicy grades Fold vs RaiseTo/Call against reference range; mixed weights surfaced in reference; **checkpoint: preflop open/3bet drills** |
 | 8 | N-player generalization (3–6 seats) | ✅ done | 18 tests; fixed `nextBlindPoster` (SB=nextSeat(btn) multiway) and `firstToAct` (UTG=seatAfter(BB)); 3-player BB option, postflop ordering, bust elimination, button rotation loop; 6-player SB/BB/UTG placement |
-| 9 | Multi-pot stress test | — | extensive regression suite for `settlePots` with multiple all-ins |
+| 9 | Multi-pot stress test | ✅ done | 41 tests; 4/5/6-player cascading all-ins, folded-only level merges (single + consecutive cascade), odd-chip independence per pot, duplicate commitment levels, chip conservation invariants (7 parameterised cases), complex showdowns with mixed winners and ties, heads-up regressions |
 | 10 | `training/drillRecord.ts` | — | append-only log + query-based analytics |
 
 ## Key invariants (don't skip)
@@ -161,3 +161,16 @@ Key implementation notes:
 - `firstToAct` preflop: computes SB then BB then UTG = nextSeat(BB). Heads-up falls out automatically (Button=SB, nextSeat(Button)=BB, nextSeat(BB)=Button).
 - All kernel predicates (needsToAct, bettingRoundComplete, currentActor, handTerminal) were already N-player general — no changes needed there.
 - `table.ts` (`nextButton`, `startHand`, `endHand`) required no changes; already correct for N players.
+
+## Repo state at step 9 completion
+
+```
+packages/
+  engine/test/pots.stress.test.ts  — 41 new tests (283 total across 8 files)
+  (all other files unchanged)
+```
+
+Key implementation notes:
+- No implementation changes — `settlePots`/`payouts` were already correct; this step is regression coverage only.
+- `bh()` helper in stress tests filters `winners` list to eligible set; use inline priority-based BestHandFn when a specific player must win each pot (not `bh()` which causes n-way ties when all are listed).
+- Chip conservation checked via parameterised cases including asymmetric amounts and folded-only merge scenarios.

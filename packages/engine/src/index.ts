@@ -18,3 +18,6 @@ export {
 
 export type { Pot, BestHandFn } from './pots.js';
 export { settlePots, totalCommitments, pots, payouts } from './pots.js';
+
+export type { TableState } from './table.js';
+export { nextButton, startHand, endHand } from './table.js';

@@ -47,6 +47,12 @@ list in the relevant section.
 4. Open a PR. CI must pass (GitHub Actions `CI` workflow) before merging.
    Do not begin the next module's implementation until this PR is merged.
    Do not include any files, types, or stubs from future steps in this PR.
+5. **After CI passes and the PR merges**, immediately:
+   a. Update `docs/STATUS.md`: mark the step ✅, add the "Repo state at step N completion" block.
+   b. Update the project memory file at
+      `~/.claude/projects/-home-crow-code-count-the-outs/memory/project_build_status.md`
+      to reflect the new current step and any key implementation notes from this hand.
+   This keeps the memory authoritative across sessions — stale memory is a trap.
 
 ## Things that look like missing features but are intentional scope cuts
 

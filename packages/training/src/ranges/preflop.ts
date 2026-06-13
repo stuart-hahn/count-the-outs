@@ -71,8 +71,8 @@ export const PREFLOP_RANGE_ENTRIES: RangeEntry[] = [
   },
   {
     spot: 'BB_3bet_vs_CO',
-    range: parseRange('KK+, AKs, AKo, A5s-A3s'),
+    range: parseRange('JJ+, AKs, AKo, A5s-A3s'),
     source: 'heuristic',
-    confidence: 'medium — tighter 3bet vs early position, standard estimate',
+    confidence: 'medium — polarized 3bet vs CO; tighter bluff range than vs BTN, standard estimate',
   },
 ];

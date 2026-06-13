@@ -24,3 +24,16 @@ if [[ $status -ne 0 ]]; then
 fi
 
 echo "tsc: OK"
+
+echo "eslint: linting..."
+eslint_output=$(pnpm exec eslint --fix "$file" 2>&1)
+eslint_status=$?
+
+if [[ $eslint_status -ne 0 ]]; then
+  echo "$eslint_output" | head -60
+  echo ""
+  echo "eslint: errors found — fix before continuing."
+  exit 1
+fi
+
+echo "eslint: OK"

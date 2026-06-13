@@ -24,22 +24,6 @@ function makeTable(opts: {
 
 const firstWins: BestHandFn = (eligible) => [eligible[0]!];
 
-// Drive PostBlind commands until none remain, returning final state.
-function postBlinds(state: GameState): GameState {
-  let s = state;
-  while (true) {
-    const r = attempt(s, { kind: 'PostBlind', amount: s.bigBlind });
-    if (!r.ok) break;
-    for (const ev of r.events) s = apply(s, ev);
-    const r2 = attempt(s, { kind: 'PostBlind', amount: s.bigBlind / 2 });
-    // reissue full-BB then half for SB — just try both amounts
-    if (!r2.ok) break;
-    for (const ev of r2.events) s = apply(s, ev);
-    break;
-  }
-  return s;
-}
-
 // Post SB + BB given table bigBlind.
 function postBlindsFull(state: GameState): GameState {
   const bb = state.bigBlind;

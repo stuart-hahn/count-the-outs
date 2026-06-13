@@ -13,8 +13,8 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 4 | `engine/table.ts` | ✅ done | 20 tests; TableState, startHand, endHand, nextButton; bust elimination; button rotation before elimination; bigBlind in TableState; **checkpoint: playable heads-up NLHE loop** |
 | 5 | `math/range.ts` + `math/equity.ts` | ✅ done | 27 tests; parseRange (all standard notations), effectiveRange (card removal), exact enumeration ≤200k threshold, MC with stderr |
 | 6 | `training/scenarioBuilder.ts` + `policies.ts` | ✅ done | 22 tests; buildScenario via attempt/apply pipeline (§10), EVPolicy (regret ≤ ε), EquityPolicy (equity vs pot-odds break-even); **checkpoint: pot-odds/equity drills** |
-| 7 | `training/ranges/` + `RangePolicy` | 🔜 next | ~10-20 heuristic reference ranges → **checkpoint: preflop open/3bet drills** |
-| 8 | N-player generalization (3–6 seats) | — | `seatOrder`/`buttonSeat`/`nextButton`; kernel already general |
+| 7 | `training/ranges/` + `RangePolicy` | ✅ done | 24 tests; 12 heuristic spots (5 opens, 3 BB defends, 4 3bets); RangePolicy grades Fold vs RaiseTo/Call against reference range; mixed weights surfaced in reference; **checkpoint: preflop open/3bet drills** |
+| 8 | N-player generalization (3–6 seats) | 🔜 next | `seatOrder`/`buttonSeat`/`nextButton`; kernel already general |
 | 9 | Multi-pot stress test | — | extensive regression suite for `settlePots` with multiple all-ins |
 | 10 | `training/drillRecord.ts` | — | append-only log + query-based analytics |
 
@@ -127,3 +127,21 @@ Key implementation notes:
 - `compute` exact threshold = 200k (`∏|effRange_i| × C(unseen, boardNeeded)`): catches all river scenarios and small-range turn/flop; falls back to MC with reported stderr.
 - Dead cards passed to `effectiveRange` = board only; inter-player card conflicts resolved during enumeration (usedKeys set).
 - MC weighted sampling handles unequal combo weights; stderr = max Bernoulli stderr over all players.
+
+## Repo state at step 7 completion
+
+```
+packages/
+  training/src/ranges/index.ts   — RangeEntry, RangeRegistry, PREFLOP_RANGES
+  training/src/ranges/preflop.ts — 12 heuristic spots (BTN/CO/HJ/UTG/SB opens, BB defends vs BTN/CO/SB, 3bet spots)
+  training/src/policies.ts       — + RangePolicy
+  training/src/index.ts          — re-exports RangeEntry, RangeRegistry, PREFLOP_RANGES, RangePolicy
+  training/test/rangePolicy.test.ts — 24 tests, all green (224 total across 7 files)
+```
+
+Key implementation notes:
+- `RangeEntry.source` is `'heuristic' | 'solver-derived' | 'author-estimate'`; all current entries tagged `'heuristic'`.
+- `RangePolicy(heroId, spot, referenceAction, registry?)`: referenceAction is `'raise'` (open spots) or `'call'` (defend spots).
+- Grading: inRange → correct iff userAction matches refAction; not-inRange → correct iff Fold. Non-rated actions pass through (correct=true, score=1).
+- Mixed weights (e.g. `KQs:0.5`): hand is "in range" if weight > 0; weight reported in reference field.
+- Adding a new spot = append to `preflop.ts` only; no `RangePolicy` changes needed (invariants.md §15).

@@ -10,8 +10,8 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 1 | `engine/cards.ts` + `math/handEvaluator.ts` | ✅ done | 54 tests; naive C(7,5) eval; wheel straight, all category/kicker/tie cases covered |
 | 2 | `engine/gameState.ts` + `transitions.ts` + `kernel.ts` | ✅ done | 52 tests; BB option, short all-in non-deadlock, non-all-in short-raise illegal, all-in run-out cascade, full hand replay pipeline; seen=-1 sentinel for fresh-street action trigger |
 | 3 | `engine/pots.ts` | ✅ done | 25 tests; layer-stripping, folded-only level merge, multi-pot side pots, odd-chip seat-order priority, BestHandFn DI (engine stays pure) |
-| 4 | `engine/table.ts` | 🔜 next | hand lifecycle, heads-up button toggle → **checkpoint: playable heads-up NLHE loop** |
-| 5 | `math/range.ts` + `math/equity.ts` | — | Range parsing, card removal, exact/MC equity |
+| 4 | `engine/table.ts` | ✅ done | 20 tests; TableState, startHand, endHand, nextButton; bust elimination; button rotation before elimination; bigBlind in TableState; **checkpoint: playable heads-up NLHE loop** |
+| 5 | `math/range.ts` + `math/equity.ts` | 🔜 next | Range parsing, card removal, exact/MC equity |
 | 6 | `training/scenarioBuilder.ts` + `policies.ts` | — | EVPolicy + EquityPolicy first → **checkpoint: pot-odds/equity drills** |
 | 7 | `training/ranges/` + `RangePolicy` | — | ~10-20 heuristic reference ranges → **checkpoint: preflop open/3bet drills** |
 | 8 | N-player generalization (3–6 seats) | — | `seatOrder`/`buttonSeat`/`nextButton`; kernel already general |
@@ -72,3 +72,20 @@ Key implementation notes:
 - `totalCommitments` sums both `BlindPosted` and `ChipsCommitted` events from history.
 - `payouts` accepts `BestHandFn` by injection — engine has no math dependency (SPEC §module map).
 - Odd-chip remainder distributed to seats earliest from `seatAfter(buttonSeat)` in `seatOrder`.
+
+## Repo state at step 4 completion
+
+```
+packages/
+  engine/src/table.ts        — TableState, startHand, endHand, nextButton
+  engine/src/index.ts        — re-exports table.ts additions
+  engine/test/table.test.ts  — 20 tests, all green (151 total across 4 files)
+```
+
+Key implementation notes:
+- `TableState` includes `bigBlind` (not in spec literal, but required by `startHand`).
+- `startHand` returns clean GameState (`currentBetLevel=0`); caller posts blinds via kernel.
+- `endHand` stack formula: `newStack[p] = finalState.players[p].stack + payouts[p]`
+  (NOT `table.stacks[p] + payouts[p]` — pre-hand stacks already "spent" committed chips).
+- Button rotated **before** eliminating bust seats — wrap-around still works when button goes bust.
+- Players with `stack==0` after `endHand` are removed from `seatOrder` and `stacks`.

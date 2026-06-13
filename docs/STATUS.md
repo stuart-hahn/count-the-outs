@@ -14,7 +14,7 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 5 | `math/range.ts` + `math/equity.ts` | ✅ done | 27 tests; parseRange (all standard notations), effectiveRange (card removal), exact enumeration ≤200k threshold, MC with stderr |
 | 6 | `training/scenarioBuilder.ts` + `policies.ts` | ✅ done | 22 tests; buildScenario via attempt/apply pipeline (§10), EVPolicy (regret ≤ ε), EquityPolicy (equity vs pot-odds break-even); **checkpoint: pot-odds/equity drills** |
 | 7 | `training/ranges/` + `RangePolicy` | ✅ done | 24 tests; 12 heuristic spots (5 opens, 3 BB defends, 4 3bets); RangePolicy grades Fold vs RaiseTo/Call against reference range; mixed weights surfaced in reference; **checkpoint: preflop open/3bet drills** |
-| 8 | N-player generalization (3–6 seats) | 🔜 next | `seatOrder`/`buttonSeat`/`nextButton`; kernel already general |
+| 8 | N-player generalization (3–6 seats) | ✅ done | 18 tests; fixed `nextBlindPoster` (SB=nextSeat(btn) multiway) and `firstToAct` (UTG=seatAfter(BB)); 3-player BB option, postflop ordering, bust elimination, button rotation loop; 6-player SB/BB/UTG placement |
 | 9 | Multi-pot stress test | — | extensive regression suite for `settlePots` with multiple all-ins |
 | 10 | `training/drillRecord.ts` | — | append-only log + query-based analytics |
 
@@ -145,3 +145,19 @@ Key implementation notes:
 - Grading: inRange → correct iff userAction matches refAction; not-inRange → correct iff Fold. Non-rated actions pass through (correct=true, score=1).
 - Mixed weights (e.g. `KQs:0.5`): hand is "in range" if weight > 0; weight reported in reference field.
 - Adding a new spot = append to `preflop.ts` only; no `RangePolicy` changes needed (invariants.md §15).
+
+## Repo state at step 8 completion
+
+```
+packages/
+  engine/src/kernel.ts           — fixed nextBlindPoster + firstToAct for 3–6 players
+  engine/test/kernel.test.ts     — +13 tests (N-player blind ordering, preflop/postflop actor, BB option, 6-player)
+  engine/test/table.test.ts      — +5 tests (3-player startHand, endHand bust, button rotation loop, hand loop checkpoint)
+  (all other files unchanged)    — 242 tests total across 7 files
+```
+
+Key implementation notes:
+- `nextBlindPoster`: heads-up SB = buttonSeat; multiway (3+) SB = nextSeat(buttonSeat), BB = nextSeat(SB).
+- `firstToAct` preflop: computes SB then BB then UTG = nextSeat(BB). Heads-up falls out automatically (Button=SB, nextSeat(Button)=BB, nextSeat(BB)=Button).
+- All kernel predicates (needsToAct, bettingRoundComplete, currentActor, handTerminal) were already N-player general — no changes needed there.
+- `table.ts` (`nextButton`, `startHand`, `endHand`) required no changes; already correct for N players.

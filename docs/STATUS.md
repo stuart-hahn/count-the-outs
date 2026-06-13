@@ -9,8 +9,8 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 |---|------|--------|-------|
 | 1 | `engine/cards.ts` + `math/handEvaluator.ts` | ✅ done | 54 tests; naive C(7,5) eval; wheel straight, all category/kicker/tie cases covered |
 | 2 | `engine/gameState.ts` + `transitions.ts` + `kernel.ts` | ✅ done | 52 tests; BB option, short all-in non-deadlock, non-all-in short-raise illegal, all-in run-out cascade, full hand replay pipeline; seen=-1 sentinel for fresh-street action trigger |
-| 3 | `engine/pots.ts` | 🔜 next | `settlePots`/`payouts`; tested standalone with hand-constructed commitment tables |
-| 4 | `engine/table.ts` | — | hand lifecycle, heads-up button toggle → **checkpoint: playable heads-up NLHE loop** |
+| 3 | `engine/pots.ts` | ✅ done | 25 tests; layer-stripping, folded-only level merge, multi-pot side pots, odd-chip seat-order priority, BestHandFn DI (engine stays pure) |
+| 4 | `engine/table.ts` | 🔜 next | hand lifecycle, heads-up button toggle → **checkpoint: playable heads-up NLHE loop** |
 | 5 | `math/range.ts` + `math/equity.ts` | — | Range parsing, card removal, exact/MC equity |
 | 6 | `training/scenarioBuilder.ts` + `policies.ts` | — | EVPolicy + EquityPolicy first → **checkpoint: pot-odds/equity drills** |
 | 7 | `training/ranges/` + `RangePolicy` | — | ~10-20 heuristic reference ranges → **checkpoint: preflop open/3bet drills** |
@@ -56,3 +56,19 @@ Key implementation notes:
   when `lastFullBetLevel = 0` (invariants §5 reset); `-1 < 0` is true so `reopened = true`.
 - `BoardCardsRevealed` apply resets `seen = -1` (not 0) for each player.
 - Kernel is N-player general from day one; heads-up falls out of the same formulas.
+
+## Repo state at step 3 completion
+
+```
+packages/
+  engine/src/pots.ts         — Pot, settlePots, totalCommitments, pots, BestHandFn, payouts
+  engine/src/index.ts        — re-exports pots.ts additions
+  engine/test/pots.test.ts   — 25 tests, all green (131 total across 3 files)
+```
+
+Key implementation notes:
+- `settlePots` layer-strips over distinct commitment levels; if a level's eligible set is empty
+  (all contributors folded), chips merge into the nearest previous pot with eligible players.
+- `totalCommitments` sums both `BlindPosted` and `ChipsCommitted` events from history.
+- `payouts` accepts `BestHandFn` by injection — engine has no math dependency (SPEC §module map).
+- Odd-chip remainder distributed to seats earliest from `seatAfter(buttonSeat)` in `seatOrder`.

@@ -15,3 +15,6 @@ export {
   apply,
   deriveNext,
 } from './kernel.js';
+
+export type { Pot, BestHandFn } from './pots.js';
+export { settlePots, totalCommitments, pots, payouts } from './pots.js';

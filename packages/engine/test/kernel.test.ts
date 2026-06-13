@@ -907,3 +907,192 @@ describe('full heads-up hand: attempt → apply pipeline', () => {
     expect(d).toMatchObject({ kind: 'input', request: { kind: 'Reveal', street: 'flop', count: 3 } });
   });
 });
+
+// ── N-player (3-6 seat) generalization ───────────────────────────────────────
+
+function freshState(seatOrder: PlayerId[], buttonSeat: PlayerId, stack = 1000, bigBlind = 20): GameState {
+  return makeState({
+    seatOrder,
+    buttonSeat,
+    bigBlind,
+    currentBetLevel: 0,
+    lastFullBetLevel: 0,
+    lastFullRaiseIncrement: bigBlind,
+    players: seatOrder.map(id => ({ id, stack, committed: 0, seen: 0 })),
+    history: [],
+  });
+}
+
+function postBlinds(state: GameState): GameState {
+  let s = state;
+  const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+    const r = attempt(s, cmd);
+    if (!r.ok) throw new Error(r.error);
+    for (const ev of r.events) s = apply(s, ev);
+  };
+  applyCmd({ kind: 'PostBlind', amount: s.bigBlind / 2 });
+  applyCmd({ kind: 'PostBlind', amount: s.bigBlind });
+  return s;
+}
+
+describe('attempt — PostBlind (3-player)', () => {
+  it('first blind goes to SB (nextSeat after button), not button', () => {
+    // A=BTN, B=SB, C=BB
+    const state = freshState(['A', 'B', 'C'], 'A');
+    const r = attempt(state, { kind: 'PostBlind', amount: 10 });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.events[0]).toMatchObject({ kind: 'BlindPosted', player: 'B', amount: 10 });
+  });
+
+  it('second blind goes to BB (nextSeat after SB)', () => {
+    let state = freshState(['A', 'B', 'C'], 'A');
+    const r1 = attempt(state, { kind: 'PostBlind', amount: 10 });
+    if (r1.ok) for (const ev of r1.events) state = apply(state, ev);
+    const r2 = attempt(state, { kind: 'PostBlind', amount: 20 });
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.events[0]).toMatchObject({ kind: 'BlindPosted', player: 'C', amount: 20 });
+  });
+
+  it('fails after both blinds posted', () => {
+    let state = freshState(['A', 'B', 'C'], 'A');
+    state = postBlinds(state);
+    const r = attempt(state, { kind: 'PostBlind', amount: 10 });
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe('currentActor — 3-player preflop ordering', () => {
+  it('first actor is UTG (seatAfter BB = button in 3-way)', () => {
+    // seatOrder: [A=BTN, B=SB, C=BB]; UTG = seatAfter(C) = A
+    const state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    expect(currentActor(state)).toBe('A');
+  });
+
+  it('after BTN acts, SB acts next', () => {
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const r = attempt(state, { kind: 'Call' }); // A calls
+    if (r.ok) for (const ev of r.events) state = apply(state, ev);
+    expect(currentActor(state)).toBe('B');
+  });
+
+  it('after BTN and SB act, BB has option (not complete yet)', () => {
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+      const r = attempt(state, cmd);
+      if (!r.ok) throw new Error(r.error);
+      for (const ev of r.events) state = apply(state, ev);
+    };
+    applyCmd({ kind: 'Call' }); // A calls
+    applyCmd({ kind: 'Call' }); // B calls
+    // C (BB) still has option
+    expect(currentActor(state)).toBe('C');
+    expect(bettingRoundComplete(state)).toBe(false);
+  });
+
+  it('BB checks — round complete (BB option)', () => {
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+      const r = attempt(state, cmd);
+      if (!r.ok) throw new Error(r.error);
+      for (const ev of r.events) state = apply(state, ev);
+    };
+    applyCmd({ kind: 'Call' }); // A
+    applyCmd({ kind: 'Call' }); // B
+    applyCmd({ kind: 'Check' }); // C (BB option)
+    expect(bettingRoundComplete(state)).toBe(true);
+  });
+});
+
+describe('currentActor — 3-player postflop ordering', () => {
+  it('first postflop actor is SB (seatAfter button)', () => {
+    // A=BTN, B=SB, C=BB; after flop reveal, SB (B) acts first
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+      const r = attempt(state, cmd);
+      if (!r.ok) throw new Error(r.error);
+      for (const ev of r.events) state = apply(state, ev);
+    };
+    applyCmd({ kind: 'Call' }); applyCmd({ kind: 'Call' }); applyCmd({ kind: 'Check' });
+    state = apply(state, { kind: 'BoardCardsRevealed', street: 'flop', cards: [] });
+    expect(currentActor(state)).toBe('B');
+  });
+
+  it('skips folded players postflop', () => {
+    // B=SB folds preflop; postflop first actor is C (BB), skipping folded B
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+      const r = attempt(state, cmd);
+      if (!r.ok) throw new Error(r.error);
+      for (const ev of r.events) state = apply(state, ev);
+    };
+    applyCmd({ kind: 'Call' }); // A calls
+    applyCmd({ kind: 'Fold' }); // B (SB) folds
+    applyCmd({ kind: 'Check' }); // C (BB) checks
+    state = apply(state, { kind: 'BoardCardsRevealed', street: 'flop', cards: [] });
+    // B folded; nextSeat(button=A) = B (folded) → skip → C
+    expect(currentActor(state)).toBe('C');
+  });
+});
+
+describe('attempt — PostBlind (6-player)', () => {
+  it('SB = B, BB = C in 6-way hand', () => {
+    // seatOrder: [A=BTN, B=SB, C=BB, D=UTG, E=UTG+1, F=UTG+2]
+    let state = freshState(['A', 'B', 'C', 'D', 'E', 'F'], 'A');
+    const r1 = attempt(state, { kind: 'PostBlind', amount: 10 });
+    expect(r1.ok).toBe(true);
+    if (r1.ok) {
+      expect(r1.events[0]).toMatchObject({ player: 'B', amount: 10 });
+      for (const ev of r1.events) state = apply(state, ev);
+    }
+    const r2 = attempt(state, { kind: 'PostBlind', amount: 20 });
+    expect(r2.ok).toBe(true);
+    if (r2.ok) expect(r2.events[0]).toMatchObject({ player: 'C', amount: 20 });
+  });
+
+  it('first preflop actor is UTG (D) in 6-way hand', () => {
+    const state = postBlinds(freshState(['A', 'B', 'C', 'D', 'E', 'F'], 'A'));
+    expect(currentActor(state)).toBe('D');
+  });
+});
+
+describe('full 3-player hand: attempt → apply pipeline', () => {
+  it('BTN folds preflop → SB calls → BB checks → advances to flop', () => {
+    // A=BTN, B=SB, C=BB
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+      const r = attempt(state, cmd);
+      expect(r.ok).toBe(true);
+      if (r.ok) for (const ev of r.events) state = apply(state, ev);
+    };
+
+    expect(currentActor(state)).toBe('A');
+    applyCmd({ kind: 'Fold' }); // A=BTN folds
+    expect(currentActor(state)).toBe('B'); // B=SB next
+    applyCmd({ kind: 'Call' }); // B calls
+    expect(currentActor(state)).toBe('C'); // C=BB has option
+    applyCmd({ kind: 'Check' }); // C checks
+    expect(bettingRoundComplete(state)).toBe(true);
+    expect(handTerminal(state)).toBe(false);
+
+    const d = deriveNext(state);
+    expect(d).toMatchObject({ kind: 'input', request: { kind: 'Reveal', street: 'flop', count: 3 } });
+  });
+
+  it('UTG raises → SB 3-bets → BB and UTG fold → SB wins', () => {
+    // A=BTN, B=SB, C=BB, D=UTG; but simpler: seatOrder [A,B,C], A=BTN
+    // A=UTG/BTN raises to 60, B=SB folds, C=BB 3-bets to 180, A folds
+    let state = postBlinds(freshState(['A', 'B', 'C'], 'A'));
+    const applyCmd = (cmd: Parameters<typeof attempt>[1]) => {
+      const r = attempt(state, cmd);
+      expect(r.ok).toBe(true);
+      if (r.ok) for (const ev of r.events) state = apply(state, ev);
+    };
+
+    applyCmd({ kind: 'RaiseTo', amount: 60 }); // A raises
+    applyCmd({ kind: 'Fold' }); // B (SB) folds
+    applyCmd({ kind: 'RaiseTo', amount: 180 }); // C (BB) 3-bets
+    applyCmd({ kind: 'Fold' }); // A folds
+
+    expect(handTerminal(state)).toBe(true);
+  });
+});

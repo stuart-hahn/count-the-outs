@@ -1,7 +1,9 @@
 import type { GameState, PlayerId, Command } from '@count-the-outs/engine';
 import { legalActions, totalCommitments } from '@count-the-outs/engine';
 import type { AnalysisContext } from '@count-the-outs/math';
-import { compute } from '@count-the-outs/math';
+import { compute, comboKey } from '@count-the-outs/math';
+import type { RangeRegistry } from './ranges/index.js';
+import { PREFLOP_RANGES } from './ranges/index.js';
 
 export interface Verdict {
   correct: boolean;
@@ -73,6 +75,51 @@ export class EquityPolicy implements EvaluationPolicy {
       explanation:
         `Hero equity ${(heroEquity * 100).toFixed(1)}% is ${direction} ` +
         `break-even ${(breakEven * 100).toFixed(1)}%. ${action} is ${verdict}.`,
+    };
+  }
+}
+
+// ── RangePolicy ───────────────────────────────────────────────────────────────
+
+/** invariants.md §13/§15 — grades actions against a curated reference range */
+export class RangePolicy implements EvaluationPolicy {
+  constructor(
+    private readonly heroId: PlayerId,
+    private readonly spot: string,
+    private readonly referenceAction: 'raise' | 'call',
+    private readonly registry: RangeRegistry = PREFLOP_RANGES,
+  ) {}
+
+  evaluate(state: GameState, userAction: Command): Verdict {
+    const entry = this.registry.get(this.spot);
+    if (!entry) {
+      return { correct: false, score: 0, reference: null, explanation: `Unknown spot: ${this.spot}` };
+    }
+
+    const hero = state.players.find(p => p.id === this.heroId);
+    if (!hero?.holeCards) {
+      return { correct: false, score: 0, reference: null, explanation: 'Hero hole cards not assigned.' };
+    }
+
+    const refKind = this.referenceAction === 'raise' ? 'RaiseTo' : 'Call';
+    const isRatedAction = userAction.kind === refKind || userAction.kind === 'Fold';
+    if (!isRatedAction) return NO_CALL_VERDICT;
+
+    const [a, b] = hero.holeCards.cards;
+    const key = comboKey(a, b);
+    const weight = entry.range.get(key) ?? 0;
+    const inRange = weight > 0;
+
+    const correct = inRange ? userAction.kind === refKind : userAction.kind === 'Fold';
+    const score = correct ? 1 : 0;
+
+    const verb = inRange ? 'is' : 'is not';
+    const actionVerdict = correct ? 'correct' : 'incorrect';
+    return {
+      correct,
+      score,
+      reference: { spot: this.spot, inRange, weight, source: entry.source, confidence: entry.confidence },
+      explanation: `${key} ${verb} in ${this.spot} (weight ${weight.toFixed(2)}). ${userAction.kind} is ${actionVerdict}.`,
     };
   }
 }

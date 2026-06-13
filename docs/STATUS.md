@@ -16,7 +16,7 @@ when a step's PR merges. Each step = its own PR, CI green before next starts.
 | 7 | `training/ranges/` + `RangePolicy` | ✅ done | 24 tests; 12 heuristic spots (5 opens, 3 BB defends, 4 3bets); RangePolicy grades Fold vs RaiseTo/Call against reference range; mixed weights surfaced in reference; **checkpoint: preflop open/3bet drills** |
 | 8 | N-player generalization (3–6 seats) | ✅ done | 18 tests; fixed `nextBlindPoster` (SB=nextSeat(btn) multiway) and `firstToAct` (UTG=seatAfter(BB)); 3-player BB option, postflop ordering, bust elimination, button rotation loop; 6-player SB/BB/UTG placement |
 | 9 | Multi-pot stress test | ✅ done | 41 tests; 4/5/6-player cascading all-ins, folded-only level merges (single + consecutive cascade), odd-chip independence per pot, duplicate commitment levels, chip conservation invariants (7 parameterised cases), complex showdowns with mixed winners and ties, heads-up regressions |
-| 10 | `training/drillRecord.ts` | — | append-only log + query-based analytics |
+| 10 | `training/drillRecord.ts` | ✅ done | 34 tests; DrillLog (append-only, copy-on-read), CoreTags taxonomy (position/street/actionContext/stackDepth/potType), aux free-form map; accuracy/filterByCore/leaks/groupBy/trend pure query functions; **checkpoint: all 10 steps complete** |
 
 ## Key invariants (don't skip)
 
@@ -174,3 +174,20 @@ Key implementation notes:
 - No implementation changes — `settlePots`/`payouts` were already correct; this step is regression coverage only.
 - `bh()` helper in stress tests filters `winners` list to eligible set; use inline priority-based BestHandFn when a specific player must win each pot (not `bh()` which causes n-way ties when all are listed).
 - Chip conservation checked via parameterised cases including asymmetric amounts and folded-only merge scenarios.
+
+## Repo state at step 10 completion
+
+```
+packages/
+  training/src/drillRecord.ts       — DrillRecord, DrillTags, CoreTags, DrillLog, accuracy, filterByCore, leaks, trend
+  training/src/index.ts             — re-exports drillRecord.ts additions
+  training/test/drillRecord.test.ts — 34 tests, all green (317 total across 9 files)
+```
+
+Key implementation notes:
+- `DrillLog.all()` returns a shallow copy — external mutation does not corrupt the internal list.
+- `CoreTags` fixed taxonomy: `position` (BTN/CO/HJ/UTG/SB/BB), `street` (preflop/flop/turn/river), `actionContext` (open/facing-raise/facing-3bet/facing-bet/facing-check), `stackDepth` (short/medium/deep), `potType` (single-raised/multi-raised/limped/all-in).
+- `aux: Record<string, string>` — free-form key-value for policy metadata (e.g. `source`, `spot`).
+- `filterByCore` uses AND semantics across specified keys; unspecified keys are ignored.
+- `leaks` groups records missing a tag under `'unknown'`.
+- `trend` sorts by `timestamp` before windowing; returns `[]` for `windowSize <= 0` or `windowSize > records.length`.

@@ -9,6 +9,7 @@ Texas Hold'em poker engine + training library. Pure TypeScript, no dependencies 
 | `@count-the-outs/engine` | Game state, legal-move enforcement, pot settlement, hand lifecycle |
 | `@count-the-outs/math` | Hand evaluation, range parsing, exact/Monte Carlo equity |
 | `@count-the-outs/training` | Scenario building, drill grading policies, drill logging and analytics |
+| `@count-the-outs/cli` | Interactive preflop drill runner (`pnpm drill`) |
 
 ## Setup
 
@@ -21,42 +22,85 @@ Requires Node ≥ 18, pnpm ≥ 8.
 
 ---
 
+## CLI drill runner
+
+```sh
+pnpm drill                              # 20 random preflop drills
+pnpm drill -- --count 10               # 10 drills
+pnpm drill -- --spot BTN_open          # one spot only, 20 drills
+pnpm drill -- --count 5 --spot UTG_open
+```
+
+Each drill shows your position, the hand dealt, and asks whether to take the reference action or fold. Verdict prints immediately with an explanation. Session summary at the end (or on Ctrl+C).
+
+```
+[1/20] BTN open
+Hand: AKs
+[r]aise / [f]old: r
+✓ AKs is in BTN_open (weight 1.00). RaiseTo is correct.
+
+[2/20] BB defend vs CO
+Hand: 72o
+[c]all / [f]old: c
+✗ 72o is not in BB_defend_vs_CO (weight 0.00). Call is incorrect.
+
+Session: 15/20 correct (75.0%)
+```
+
+**Available spots:**
+
+| Spot | Hero | Decision |
+|------|------|----------|
+| `UTG_open` | UTG | raise or fold |
+| `HJ_open` | HJ | raise or fold |
+| `CO_open` | CO | raise or fold |
+| `BTN_open` | BTN | raise or fold |
+| `SB_open` | SB | raise or fold |
+| `BB_defend_vs_BTN` | BB | call or fold |
+| `BB_defend_vs_CO` | BB | call or fold |
+| `BB_defend_vs_SB` | BB | call or fold |
+| `BTN_3bet_vs_CO` | BTN | raise (3bet) or fold |
+| `SB_3bet_vs_BTN` | SB | raise (3bet) or fold |
+| `BB_3bet_vs_BTN` | BB | raise (3bet) or fold |
+| `BB_3bet_vs_CO` | BB | raise (3bet) or fold |
+
+Verdicts are graded against heuristic 6-max ranges (medium confidence). Stack depth is fixed at 100BB.
+
+---
+
 ## engine
 
 ### Running a hand
 
 ```ts
 import {
-  startHand, endHand, nextButton,
+  startHand, endHand,
   attempt, apply, deriveNext,
   currentActor, handTerminal, legalActions,
-  payouts,
+  parseCard,
 } from '@count-the-outs/engine';
-import { rank } from '@count-the-outs/math';
+import type { BestHandFn } from '@count-the-outs/engine';
 
 const table = {
-  id: 'table-1',
+  handNumber: 1,
   seatOrder: ['alice', 'bob'],
   buttonSeat: 'alice',
   bigBlind: 100,
   stacks: new Map([['alice', 1000], ['bob', 1000]]),
 };
 
-// Deal a hand
 let state = startHand(table);
 
-// Post blinds (heads-up: button posts SB, other posts BB)
-state = apply(state, { kind: 'BlindPosted', playerId: 'alice', amount: 50 });
-state = apply(state, { kind: 'BlindPosted', playerId: 'bob',   amount: 100 });
+// Post blinds — engine determines who posts from game state
+for (const amount of [50, 100]) {
+  const result = attempt(state, { kind: 'PostBlind', amount });
+  if (!result.ok) throw new Error(result.error);
+  for (const ev of result.events) state = apply(state, ev);
+}
 
-// Assign hole cards
-state = apply(state, {
-  kind: 'HoleCardsDealt',
-  hands: new Map([
-    ['alice', { cards: [parseCard('Ah'), parseCard('Kd')] }],
-    ['bob',   { cards: [parseCard('7c'), parseCard('2h')] }],
-  ]),
-});
+// Assign hole cards (TransitionEvent injected directly)
+state = apply(state, { kind: 'HoleCardsAssigned', player: 'alice', cards: [parseCard('Ah'), parseCard('Kd')] });
+state = apply(state, { kind: 'HoleCardsAssigned', player: 'bob',   cards: [parseCard('7c'), parseCard('2h')] });
 
 // Action loop
 while (!handTerminal(state)) {
@@ -64,46 +108,42 @@ while (!handTerminal(state)) {
   if (!actor) { state = deriveNext(state); continue; }
 
   const legal = legalActions(state, actor);
-  // legal.canCheck / legal.canFold / legal.callAmount / legal.minRaise / legal.maxRaise
+  // legal.canCheck, legal.canFold, legal.canCall
+  // legal.callAmount, legal.raiseMin, legal.raiseMax
 
-  // Submit a decision
-  const result = attempt(state, { kind: 'Call', playerId: actor });
+  const result = attempt(state, { kind: 'Call' });
   if (!result.ok) throw new Error(result.error);
   for (const ev of result.events) state = apply(state, ev);
 }
 
-// Settle pots
-const payout = payouts(state, (ids, board) => {
-  // supply a BestHandFn — rank() from @count-the-outs/math works here
-  return ids.reduce((best, id) => {
-    const player = state.players.find(p => p.id === id)!;
-    const cards = [...player.holeCards!.cards, ...board];
-    const r = rank(cards);
-    if (!best || r.category > best.rank.category) return { winnerId: id, rank: r };
-    return best;
-  }, null as { winnerId: string; rank: ReturnType<typeof rank> } | null)?.winnerId
-    ? [best.winnerId] : ids;
-  // simplified — see pots.ts for full BestHandFn signature
-});
+// Settle pots and advance the table
+import { rank, compareHandRank } from '@count-the-outs/math';
 
-// End the hand; get updated stacks
-const nextTable = endHand(table, state, payout);
-const nextTable2 = { ...nextTable, buttonSeat: nextButton(nextTable) };
+const bestHand: BestHandFn = (playerIds, board) => {
+  const ranked = playerIds.map(id => {
+    const p = state.players.find(p => p.id === id)!;
+    return { id, r: rank([...p.holeCards!.cards, ...board]) };
+  }).sort((a, b) => compareHandRank(b.r, a.r));
+  const top = ranked[0]!.r;
+  return ranked.filter(x => compareHandRank(x.r, top) === 0).map(x => x.id);
+};
+
+const nextTable = endHand(table, state, bestHand);
 ```
 
 ### Key types
 
 ```ts
-// Commands (what players submit)
-{ kind: 'Check',   playerId: string }
-{ kind: 'Fold',    playerId: string }
-{ kind: 'Call',    playerId: string }
-{ kind: 'RaiseTo', playerId: string; amount: number }
-{ kind: 'PostBlind', playerId: string; amount: number }
+// Commands (what players submit — no playerId field; engine resolves actor from state)
+{ kind: 'Check' }
+{ kind: 'Fold' }
+{ kind: 'Call' }
+{ kind: 'RaiseTo'; amount: number }
+{ kind: 'PostBlind'; amount: number }
 
 // Predicates
 currentActor(state)           // PlayerId | null — who must act next
-legalActions(state, playerId) // { canCheck, canFold, callAmount, minRaise, maxRaise }
+legalActions(state, playerId) // { canCheck, canFold, canCall, callAmount, raiseMin, raiseMax }
 handTerminal(state)           // boolean — hand is over
 bettingRoundComplete(state)   // boolean — street action is closed
 ```
@@ -121,7 +161,7 @@ import { parseCard } from '@count-the-outs/engine';
 const cards = ['Ah', 'Kh', 'Qh', 'Jh', 'Th', '2c', '7d'].map(parseCard);
 const r = rank(cards); // picks best 5 from 7
 r.category; // HandCategory.StraightFlush
-compareHandRank(r1, r2); // 1 | 0 | -1
+compareHandRank(r1, r2); // positive if r1 > r2, 0 if tie, negative if r1 < r2
 ```
 
 ### Range parsing
@@ -144,23 +184,19 @@ const live = effectiveRange(range, board);
 ```ts
 import { compute } from '@count-the-outs/math';
 import { parseRange } from '@count-the-outs/math';
-import { parseCard } from '@count-the-outs/engine';
 
 const ctx = {
-  heroId: 'alice',
-  players: [
-    { id: 'alice', holeCards: [parseCard('Ah'), parseCard('Kh')] },
-    { id: 'bob',   range: parseRange('QQ+, AKs') },
-  ],
-  board: [parseCard('Qh'), parseCard('Jh'), parseCard('2c')],
+  state,           // GameState — provides board and player hole cards
+  observer: 'alice',
+  assumptions: new Map([
+    ['bob', parseRange('QQ+, AKs')],
+  ]),
 };
 
 const result = compute(ctx);
 result.equity.get('alice'); // e.g. 0.42
-result.method;              // 'exact' | 'montecarlo'
-result.stderr;              // max Bernoulli stderr (MC only)
-// Uses exact enumeration when product of range sizes × board combinations ≤ 200k,
-// otherwise Monte Carlo.
+result.method;              // { type: 'Exact' } | { type: 'MonteCarlo', samples, stderr }
+// Uses exact enumeration when combos × runouts ≤ 200k, otherwise Monte Carlo (10k samples).
 ```
 
 ---
@@ -169,8 +205,11 @@ result.stderr;              // max Bernoulli stderr (MC only)
 
 ### Build a scenario
 
+Steps are a flat list of `Command | TransitionEvent`. Commands (`PostBlind`, `Fold`, `Call`, `RaiseTo`, `Check`) are validated by the engine — the actor is determined from game state, not specified in the command. TransitionEvents (`HoleCardsAssigned`, `BoardCardsRevealed`, etc.) are applied directly.
+
 ```ts
 import { buildScenario } from '@count-the-outs/training';
+import { parseCard } from '@count-the-outs/engine';
 
 const state = buildScenario({
   seatOrder: ['hero', 'villain'],
@@ -178,18 +217,16 @@ const state = buildScenario({
   bigBlind: 100,
   stacks: new Map([['hero', 1000], ['villain', 1000]]),
   steps: [
-    { kind: 'PostBlind', playerId: 'hero',    amount: 50 },
-    { kind: 'PostBlind', playerId: 'villain', amount: 100 },
-    { kind: 'HoleCardsDealt', hands: new Map([
-      ['hero',    { cards: [parseCard('Ah'), parseCard('Kd')] }],
-      ['villain', { cards: [parseCard('Qc'), parseCard('Qh')] }],
-    ])},
-    { kind: 'RaiseTo', playerId: 'hero',    amount: 300 },
-    { kind: 'Call',    playerId: 'villain' },
-    { kind: 'BoardCardsRevealed', cards: [parseCard('As'), parseCard('2h'), parseCard('7c')] },
+    { kind: 'PostBlind', amount: 50 },
+    { kind: 'PostBlind', amount: 100 },
+    { kind: 'HoleCardsAssigned', player: 'hero',    cards: [parseCard('Ah'), parseCard('Kd')] },
+    { kind: 'HoleCardsAssigned', player: 'villain', cards: [parseCard('Qc'), parseCard('Qh')] },
+    { kind: 'RaiseTo', amount: 300 },  // hero (BTN/SB) raises
+    { kind: 'Call' },                  // villain (BB) calls
+    { kind: 'BoardCardsRevealed', street: 'flop', cards: [parseCard('As'), parseCard('2h'), parseCard('7c')] },
   ],
 });
-// state is now on the flop, hero has top pair top kicker, villain has an overpair
+// state is now on the flop, villain to act
 ```
 
 ### Grade a decision
@@ -198,19 +235,16 @@ const state = buildScenario({
 
 ```ts
 import { EquityPolicy } from '@count-the-outs/training';
-import { compute, parseRange } from '@count-the-outs/math';
+import { parseRange } from '@count-the-outs/math';
 
 const policy = new EquityPolicy('hero');
 const ctx = {
-  heroId: 'hero',
-  players: [
-    { id: 'hero',    holeCards: [parseCard('Ah'), parseCard('Kd')] },
-    { id: 'villain', range: parseRange('QQ, AA') },
-  ],
-  board: state.board,
+  state,
+  observer: 'hero',
+  assumptions: new Map([['villain', parseRange('QQ, AA')]]),
 };
 
-const verdict = policy.evaluate(state, { kind: 'Call', playerId: 'hero' }, ctx);
+const verdict = policy.evaluate(state, { kind: 'Call' }, ctx);
 verdict.correct;     // boolean
 verdict.score;       // 0–1
 verdict.explanation; // human-readable string
@@ -226,10 +260,11 @@ const policy = new EVPolicy('hero', /* epsilon */ 0, /* scale */ 'pot');
 **RangePolicy** — grades against a curated preflop reference range:
 
 ```ts
-import { RangePolicy, PREFLOP_RANGES } from '@count-the-outs/training';
+import { RangePolicy } from '@count-the-outs/training';
 
 const policy = new RangePolicy('hero', 'BTN_open', 'raise');
-const verdict = policy.evaluate(state, { kind: 'RaiseTo', playerId: 'hero', amount: 250 });
+const verdict = policy.evaluate(state, { kind: 'RaiseTo', amount: 250 });
+// Second arg is the spot key; third is the reference action ('raise' | 'call').
 // Available spots: BTN_open, CO_open, HJ_open, UTG_open, SB_open,
 //                 BB_defend_vs_BTN, BB_defend_vs_CO, BB_defend_vs_SB,
 //                 BTN_3bet_vs_CO, SB_3bet_vs_BTN, BB_3bet_vs_BTN, BB_3bet_vs_CO
@@ -246,7 +281,7 @@ const log = new DrillLog();
 
 log.append({
   scenarioSpec,
-  userAction: { kind: 'Call', playerId: 'hero' },
+  userAction: { kind: 'Call' },
   verdict,
   tags: {
     core: { position: 'BTN', street: 'flop', actionContext: 'facing-bet', stackDepth: 'deep', potType: 'single-raised' },

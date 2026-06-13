@@ -9,6 +9,12 @@ export default [
     },
   },
   {
+    files: ['packages/cli/src/**/*.ts'],
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
     ignores: ['node_modules/**'],
   },
 ];

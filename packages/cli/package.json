@@ -1,0 +1,10 @@
+{
+  "name": "@count-the-outs/cli",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@count-the-outs/engine": "workspace:*",
+    "@count-the-outs/training": "workspace:*"
+  }
+}
